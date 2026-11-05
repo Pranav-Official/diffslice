@@ -1,0 +1,155 @@
+{
+  "schema": 1,
+  "exclude": [
+    ".agents/**",
+    ".claude/**",
+    ".opencode/**",
+    ".pi/**",
+    ".github/**",
+    ".codex/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/package-lock.json",
+    "**/pnpm-lock.yaml",
+    "**/yarn.lock"
+  ],
+  "modules": [
+    {
+      "id": "web",
+      "name": "Web application",
+      "include": [
+        "apps/web/**"
+      ],
+      "children": [
+        {
+          "id": "editor",
+          "name": "Editor",
+          "include": [
+            "apps/web/src/editor/**"
+          ]
+        },
+        {
+          "id": "runs",
+          "name": "Run inspection",
+          "include": [
+            "apps/web/src/run/**"
+          ]
+        },
+        {
+          "id": "usage",
+          "name": "Usage",
+          "include": [
+            "apps/web/src/pages/usage/**",
+            "apps/web/src/pages/UsagePanel.tsx",
+            "apps/web/src/styles/usage.css",
+            "apps/web/test/usage-panel.test.tsx"
+          ]
+        },
+        {
+          "id": "web-workflows",
+          "name": "Workflow interface",
+          "include": [
+            "apps/web/src/workflows/**"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "engine",
+      "name": "Execution engine",
+      "include": [
+        "packages/engine/**"
+      ]
+    },
+    {
+      "id": "adapters",
+      "name": "Agent integrations",
+      "include": [
+        "packages/adapters/**"
+      ]
+    },
+    {
+      "id": "server",
+      "name": "Server",
+      "include": [
+        "packages/server/**"
+      ]
+    },
+    {
+      "id": "storage",
+      "name": "Storage",
+      "include": [
+        "packages/store/**"
+      ]
+    },
+    {
+      "id": "cli",
+      "name": "Command line",
+      "include": [
+        "packages/cli/**"
+      ]
+    },
+    {
+      "id": "contracts",
+      "name": "Contracts and core",
+      "include": [
+        "packages/api/**",
+        "packages/core/**",
+        "packages/schema/**"
+      ]
+    },
+    {
+      "id": "decisions",
+      "name": "Decisions",
+      "include": [
+        "packages/decisions/**"
+      ]
+    },
+    {
+      "id": "workspaces",
+      "name": "Workspace management",
+      "include": [
+        "packages/workspaces/**"
+      ]
+    },
+    {
+      "id": "mcp",
+      "name": "MCP integration",
+      "include": [
+        "packages/mcp/**"
+      ]
+    },
+    {
+      "id": "tooling",
+      "name": "Development tools",
+      "include": [
+        "tools/**",
+        "scripts/**",
+        "test/**",
+        "tests/**"
+      ]
+    },
+    {
+      "id": "docs",
+      "name": "Documentation",
+      "include": [
+        "docs/**",
+        "*.md"
+      ]
+    },
+    {
+      "id": "root",
+      "name": "Repository configuration",
+      "include": [
+        "*.json",
+        "*.yaml",
+        "*.yml",
+        "*.toml",
+        ".gitignore",
+        ".npmrc",
+        ".nvmrc",
+        ".dependency-cruiser.cjs"
+      ]
+    }
+  ]
+}

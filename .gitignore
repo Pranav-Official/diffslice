@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.artifacts/
+.diffslice/
+.impeccable/hook.cache.json
+.impeccable/review/
+.impeccable/questions/
+.env
+.env.*
+!.env.example
+*.log
