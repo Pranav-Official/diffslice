@@ -1,15 +1,17 @@
 import { parseArgs } from 'node:util';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { repositoryRoot, resolvePr } from './git.js';
+import { git, repositoryRoot, resolvePr } from './git.js';
 import { prepareReview } from './review.js';
 import { startServer, exportHtml, createDiffLoader } from './server.js';
 import { updateModuleIndex } from './module-index.js';
 import { initializeModules, type InitGroup } from './init.js';
 import { installPrecommit, uninstallPrecommit, precommitStatus, runPrecommit } from './precommit.js';
 
-const HELP = `DiffSlice 0.1.0 — Git changes on your module map
+const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+const HELP = `DiffSlice ${VERSION} — Git changes on your module map
 
   diffslice compare <base> <head> [options]
   diffslice init [--repo <path>] [--dry-run] [--json]
@@ -48,7 +50,7 @@ async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
     repo: { type: 'string' }, map: { type: 'string' }, port: { type: 'string' }, 'no-open': { type: 'boolean' }, export: { type: 'string' }, json: { type: 'boolean' }, 'cache-dir': { type: 'string' }, modules: { type: 'string' }, staged: { type: 'boolean' }, 'dry-run': { type: 'boolean' }, 'install-hook': { type: 'boolean' }, 'graphify-python': { type: 'string' }, help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
   } });
-  if (values.version) { console.log('0.1.0'); return; }
+  if (values.version) { console.log(VERSION); return; }
   if (values.help || !positionals.length) { console.log(HELP); return; }
   const [command, first, second] = positionals;
   if (command === 'hook') {
@@ -74,7 +76,15 @@ async function main() {
       for (const file of result.ambiguous) console.log(`  Ambiguous: ${file.path} (${file.candidates.join(', ')})`);
       console.log(`\n${result.note}`);
       console.log(result.cache.status === 'ready' ? `Cached ${result.cache.files} committed files (${result.cache.lines} lines) for the first review.` : result.cache.reason);
-      console.log(result.status === 'dry-run' ? 'No files written. Run diffslice init to save these rules.\n' : 'Review existing commits: diffslice compare HEAD~1 HEAD\nRules stay local until you choose to stage and commit diffslice.modules.json.\n');
+      if (result.status === 'dry-run') console.log('No files written. Run npx diffslice init to save these rules.\n');
+      else {
+        let hasPair = false;
+        try { await git(repo, ['rev-parse', '--verify', '--end-of-options', 'HEAD~1^{commit}']); hasPair = true; } catch { /* new or shallow repository */ }
+        console.log(hasPair ? 'Review existing commits: npx diffslice compare HEAD~1 HEAD' : 'Review needs two existing commits. Once history is available, run npx diffslice compare <base> <head>.');
+        console.log('Share setup by committing diffslice.modules.json with package.json and your package-manager lockfile. Nothing was staged.');
+        if (!hook) console.log('No hooks or Graphify were installed. Optional combined hook: npx diffslice hook install (requires uv or --graphify-python).');
+        console.log();
+      }
       if (hook) console.log(`Combined pre-commit hook installed at ${hook.hookPath}. Stage diffslice.modules.json before committing.`);
     }
     return;

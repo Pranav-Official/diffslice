@@ -30,6 +30,9 @@ test('portable export embeds all diffs and escapes script injection', async t =>
   await exportHtml(output, review, createDiffLoader(f.root, review), path.resolve('dist/viewer'));
   const html = await readFile(output, 'utf8');
   assert.match(html, /data:font\/woff2;base64/);
+  const licenses = JSON.parse(html.match(/<script id="diffslice-licenses" type="application\/json">([\s\S]*?)<\/script>/)![1]);
+  assert.match(licenses, /@fontsource-variable\/manrope/);
+  assert.match(licenses, /SIL OPEN FONT LICENSE/);
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
   const raw = html.match(/<script id="diffslice-data" type="application\/json">([\s\S]*?)<\/script>/)![1];
   const data = JSON.parse(raw); assert.equal(Object.keys(data.diffs).length, 5);

@@ -103,3 +103,22 @@ test('CLI init supports immediate historical comparison with local rules, then c
   await assert.rejects(cli(f.root, 'compare', f.base, f.head, '--dry-run'), /--dry-run is only supported/);
   await assert.rejects(cli(f.root, 'init', 'extra'), /Usage: diffslice init/);
 });
+
+test('CLI init gives project-local next steps without promising unavailable history or installing hooks', async () => {
+  const { repo, put } = await emptyRepo();
+  await put('package.json', '{"name":"consumer","scripts":{"test":"existing-test"}}\n');
+  const manifest = await readFile(path.join(repo, 'package.json'), 'utf8');
+  const initialized = (await cli(repo, 'init')).stdout;
+  assert.match(initialized, /Review needs two existing commits/);
+  assert.match(initialized, /npx diffslice compare <base> <head>/);
+  assert.match(initialized, /No hooks or Graphify were installed/);
+  assert.equal(await readFile(path.join(repo, 'package.json'), 'utf8'), manifest);
+  await assert.rejects(access(path.join(repo, '.git/hooks/pre-commit')));
+  await assert.rejects(access(path.join(repo, '.git/diffslice/tools/graphify')));
+  assert.equal((await git(repo, ['diff', '--cached', '--name-only'])).trim(), '');
+  await git(repo, ['config', 'user.name', 'DiffSlice tests']); await git(repo, ['config', 'user.email', 'diffslice@example.invalid']);
+  await git(repo, ['add', '.']); await git(repo, ['commit', '-qm', 'First']);
+  assert.match((await cli(repo, 'init')).stdout, /Review needs two existing commits/);
+  await git(repo, ['commit', '--allow-empty', '-qm', 'Second']);
+  assert.match((await cli(repo, 'init')).stdout, /Review existing commits: npx diffslice compare HEAD~1 HEAD/);
+});

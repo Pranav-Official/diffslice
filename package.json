@@ -4,11 +4,18 @@
   "description": "Review Git changes on a named, zoomable module map.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pranav-Official/diffslice.git"
+  },
+  "homepage": "https://github.com/Pranav-Official/diffslice#readme",
+  "bugs": "https://github.com/Pranav-Official/diffslice/issues",
   "bin": {
     "diffslice": "dist/cli.js"
   },
   "files": [
     "dist",
+    "docs",
     "examples",
     "README.md",
     "LICENSE"
@@ -21,23 +28,23 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/core.test.ts test/server.test.ts test/module-index.test.ts test/rule-review.test.ts test/init.test.ts test/precommit.test.ts",
     "benchmark:hook": "node scripts/benchmark-module-hook.mjs",
+    "benchmark:precommit": "node scripts/benchmark-precommit.mjs",
     "verify:init": "node scripts/verify-init.mjs",
     "verify:precommit": "node scripts/verify-precommit.mjs",
+    "verify:package": "node scripts/verify-package.mjs",
     "test:browser": "playwright test",
     "dev": "tsx src/cli.ts",
     "prepack": "npm run build",
     "review:devchestra": "node dist/cli.js compare HEAD~1 HEAD --repo ../Dev-Chestrav --modules examples/devchestra.modules.json --port 4387",
     "review:latest-two": "node dist/cli.js compare 5fecd6fc127cd1293f583986f0523da463b67fba cb3567798e7f31385b457d9fc13f20a1d9ea1f3a --repo ../Dev-Chestrav --modules examples/devchestra.modules.json --port 4388"
   },
-  "dependencies": {
+  "devDependencies": {
     "@fontsource-variable/manrope": "^5.2.8",
     "d3-hierarchy": "^3.1.3",
     "diff": "^8.0.2",
     "lucide-react": "^0.468.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
-  },
-  "devDependencies": {
+    "react-dom": "^19.2.0",
     "@playwright/test": "^1.64.1",
     "@types/d3-hierarchy": "^3.1.7",
     "@types/node": "^22.20.5",

@@ -7,6 +7,7 @@ import type { Server } from 'node:http';
 import { prepareReview } from '../src/review.js';
 import { startServer, createDiffLoader, exportHtml } from '../src/server.js';
 import type { Review } from '../src/types.js';
+import { buildHierarchy, fileTrail } from '../src/treemap.js';
 
 const repo = path.resolve(process.env.DIFFSLICE_TEST_REPO ?? '../Dev-Chestrav');
 const mapPath = path.resolve(process.env.DIFFSLICE_TEST_MAP ?? '.artifacts/devchestra/graphify-out/graph.json');
@@ -44,21 +45,24 @@ test('LOC treemap takes center stage with no initially open diff, and file tree 
 
 test('logical module drill-down opens nested directory, file diff, and returns to the full map', async ({ page }) => {
   await page.goto(url); await page.getByRole('checkbox', { name: 'Changes only' }).check();
-  await page.locator('.map-tile[data-node-id="module:community:144"]').click();
-  await expect(page.getByRole('navigation', { name: 'Map breadcrumbs' })).toContainText('web/pages/usage');
-  await page.getByRole('button', { name: /^pages, .*open area$/ }).click();
-  await page.getByRole('button', { name: /^usage, .*open area$/ }).click();
-  await expect(page.getByRole('navigation', { name: 'Map breadcrumbs' }).getByRole('button').last()).toHaveText('usage');
-  await page.getByRole('button', { name: /^ProjectUsage.tsx, .*open file$/ }).click();
+  // Community numbers and directory groupings change when a real map is rebuilt.
+  const trail = fileTrail(buildHierarchy(review, 'modules'), 'apps/web/src/pages/usage/ProjectUsage.tsx')!;
+  expect(trail.some(entry => entry.kind === 'module')).toBe(true);
+  expect(trail.some(entry => entry.kind === 'directory')).toBe(true);
+  for (const entry of trail.slice(1, -1)) {
+    await page.locator(`.map-tile[data-node-id=${JSON.stringify(entry.id)}]`).click();
+    await expect(page.getByRole('navigation', { name: 'Map breadcrumbs' }).getByRole('button').last()).toHaveText(entry.name);
+  }
+  await page.locator(`.map-tile[data-node-id=${JSON.stringify(trail.at(-1)!.id)}]`).click();
   await expect(page.locator('.code-cell.add')).toHaveCount(322); await expect(page.locator('.code-cell.delete')).toHaveCount(0);
   await page.screenshot({ path: path.join(artifacts, 'treemap-diff.png') });
   await page.getByRole('button', { name: 'Close diff', exact: true }).click();
   await expect(page.getByRole('region', { name: 'File diff' })).toHaveCount(0);
-  await expect(page.getByRole('navigation', { name: 'Map breadcrumbs' }).getByRole('button').last()).toHaveText('usage');
-  await page.getByRole('button', { name: 'Go up one level', exact: true }).click();
-  await expect(page.getByRole('navigation', { name: 'Map breadcrumbs' }).getByRole('button').last()).toHaveText('pages');
-  await page.getByRole('button', { name: 'Go up one level', exact: true }).click();
-  await expect(page.getByRole('navigation', { name: 'Map breadcrumbs' }).getByRole('button').last()).toHaveText('web/pages/usage');
+  await expect(page.getByRole('navigation', { name: 'Map breadcrumbs' }).getByRole('button').last()).toHaveText(trail.at(-2)!.name);
+  for (let index = trail.length - 3; index >= 0; index--) {
+    await page.getByRole('button', { name: 'Go up one level', exact: true }).click();
+    await expect(page.getByRole('navigation', { name: 'Map breadcrumbs' }).getByRole('button').last()).toHaveText(trail[index].name);
+  }
 });
 
 test('directory mode drills one level per click and file rectangles follow physical LOC', async ({ page }) => {

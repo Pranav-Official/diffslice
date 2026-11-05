@@ -1,0 +1,28 @@
+# DiffSlice agent notes
+
+## Build and verification
+
+- Use Node.js 22+ and Git; install dependencies with `npm ci`.
+- Verification order: `npm run typecheck` → `npm run build` → `npm test`. Tests import TS sources but also execute `dist/cli.js` and serve `dist/viewer`; rebuild after changes to avoid testing stale bundles. No lint or formatter script is configured.
+- Focused test: `node --import tsx --test test/module-index.test.ts`. Filter by name with `node --import tsx --test --test-name-pattern='pattern' test/module-index.test.ts`. `npm test` lists six files explicitly; add new Node test files to that script.
+- `npm run dev -- <args>` runs the source CLI, not a viewer dev server. For browser/export work, build and use `node dist/cli.js compare <base> <head> --repo <path> --no-open`; source-mode asset lookup points at `src/viewer`, not `dist/viewer`.
+- Browser checks: `npx playwright install chromium`, then `npm run test:browser` (after building). Both specs require DevChestra with pinned commits, defaulting to `../Dev-Chestrav`; `DIFFSLICE_TEST_REPO` relocates that checkout, but cannot substitute arbitrary history. `browser.spec.ts` additionally needs `.artifacts/devchestra/graphify-out/graph.json` or `DIFFSLICE_TEST_MAP`. Missing inputs skip suites.
+- Real Graphify tests in `test/precommit.test.ts` skip unless `DIFFSLICE_GRAPHIFY_PYTHON` points to a prepared interpreter, or `.artifacts/graphify-tool/venv/bin/python` exists (`Scripts/python.exe` on Windows). Graphify must be 0.9.102+; these tests can take minutes.
+- `npm run verify:init` and `npm run verify:precommit` use isolated clones of `../Dev-Chestrav`, writing reports under `.artifacts/init/` and `.artifacts/precommit/`. Both require built output; init verification also needs Chromium. Precommit verification provisions Graphify with `uv`/Python 3.12 and runs real extraction. `npm run benchmark:hook` measures only the DiffSlice module cache, not the combined Graphify hook.
+- After building, `npm run verify:package` tests an offline tarball install in an external temporary consumer, including CLI, HTTP assets/patches, and export; it needs neither DevChestra nor Graphify. Release publishing is a manual opt-in in `.github/workflows/release.yml`, requiring npm trusted publishing.
+- `npm run benchmark:precommit -- /path/to/repo` compares native/adapted updates in an isolated clone; it asserts full graph equality and exactly one materialized blob in changed-file cases. `DIFFSLICE_GRAPHIFY_NATIVE=1` disables only rebase memoization; `DIFFSLICE_PROFILE_GRAPHIFY=1` records cProfile data on non-cached updates (profiling changes wall time).
+
+## Execution boundaries
+
+- One npm package, two esbuild bundles: `src/cli.ts` → `dist/cli.js`; `src/viewer/main.tsx` → `dist/viewer/app.js` plus CSS/fonts. `scripts/build.mjs` generates the HTML shell; edit sources, not `dist`.
+- All libraries are bundled and belong in `devDependencies`; consumers have no runtime npm dependencies or install-time setup. Keep hook/Graphify installation explicit. Local hook launchers resolve the CLI from the current or installing worktree; saved paths under the checkout/common Git directory are rebased on relocation.
+- `src/graphify-update.ts` delegates native update and only memoizes Graphify 0.9.102's per-source rebasing; keep the exact-version gate and native fallback. Private runtimes include SQL; external interpreters are never modified. Detailed timing semantics/evidence: `docs/precommit-performance.md`.
+- `src/review.ts::prepareReview` joins Git changes, module ownership and physical LOC metrics. Rule resolution/cache lives in `module-index.ts` and `rule-map.ts`; Graphify import is a separate path in `graphify.ts`. `treemap.ts` is shared with the React viewer; `types.ts` defines the shared contracts.
+- Review rules come from the selected head commit when available, otherwise the local config; external rules come from disk. Explicit `--map` bypasses auto-detected rules. File contents/patches always come from the compared commits, never the working tree.
+- `src/server.ts` serves lazy patches in live mode and embeds all patches/fonts/assets for offline export. Preserve both paths and script-data escaping (`serializeEmbedded`); exports must work without HTTP requests.
+
+## Invariants worth preserving
+
+- Comparison never checks out files or runs Graphify/LLMs. Hook installation/extraction is a separate opt-in workflow in `precommit.ts`; `staged-copy.ts` materializes raw index blobs, not working-tree files. Preserve staged-only rules/content, index-change rejection, existing hooks and linked-worktree isolation; never auto-stage generated output.
+- Rule-based files have one primary owner: deepest match wins; equal-depth conflicts and unmatched files go to Unassigned. Deleted files use base ownership under the selected rules; renames use destination ownership. Excluded/unmapped changes must remain reviewable.
+- Map area represents physical LOC, independently of edit count; color represents change status. Keep the diff pane closed until file selection. For UI changes consult `DESIGN.md`; `styles.css` has later “Dark workbench” overrides, and `--green` is actually the blue interaction accent.

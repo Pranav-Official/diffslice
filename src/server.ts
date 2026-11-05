@@ -33,8 +33,9 @@ export async function renderExport(review: Review, getDiff: (id: string) => Prom
     css = css.replaceAll(match[0], `url(data:font/woff2;base64,${bytes.toString('base64')})`);
   }
   const js = (await readFile(path.join(assets, 'app.js'), 'utf8')).replace(/<\/script/gi, '<\\/script');
+  const licenses = await readFile(path.join(assets, 'THIRD_PARTY_NOTICES.txt'), 'utf8');
   const data: ExportData = { review, diffs };
-  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DiffSlice review</title><style>${css}</style></head><body><div id="root"></div><script id="diffslice-data" type="application/json">${serializeEmbedded(data)}</script><script>${js}</script></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DiffSlice review</title><style>${css}</style></head><body><div id="root"></div><script id="diffslice-data" type="application/json">${serializeEmbedded(data)}</script><script id="diffslice-licenses" type="application/json">${serializeEmbedded(licenses)}</script><script>${js}</script></body></html>`;
 }
 export async function exportHtml(output: string, review: Review, getDiff: (id: string) => Promise<FileDiff>, assets = viewerDir()) {
   const html = await renderExport(review, getDiff, assets);

@@ -12,83 +12,73 @@ Review Git changes on a zoomable code map. DiffSlice opens a local dark-mode web
 
 | Requirement | Used for |
 |---|---|
-| Node.js 22+ and Git | All commands |
+| Node.js 22+, npm, and Git | Project installation and review |
 | `uv` | Provisioning Graphify for the combined hook |
 | Authenticated GitHub CLI (`gh`) | Reviewing PR links |
 | Existing Graphify Python environment | Alternative to provisioning with uv |
 
 Rules-only reviews need neither Graphify nor an API key. Graphify code extraction also runs locally without an LLM. Optional document/image semantic extraction is outside the combined hook.
 
-## Install
+## Install in your project
 
-Clone the repository and build the CLI:
+[DiffSlice is available on npm](https://www.npmjs.com/package/diffslice). The package ships the built CLI, browser viewer, and fonts. No DiffSlice clone, build, global install, Python, or API key is needed for rules-based reviews.
 
-```powershell
-git clone https://github.com/Pranav-Official/diffslice.git
-cd diffslice
-npm install
-npm run build
-npm link
-diffslice --help
+Run inside the Git repository you want to review:
+
+```sh
+npm install --save-dev --save-exact diffslice
+npx diffslice init
+npx diffslice compare HEAD~1 HEAD
 ```
 
-Without linking, use `node D:/Misc/diffslice/dist/cli.js` in place of `diffslice`.
+Review the generated `diffslice.modules.json`, then commit it with `package.json` and your package-manager lockfile. Ensure `node_modules/` is ignored by Git. Teammates run `npm ci` and use the same commands and pinned DiffSlice version. If the repository has no `package.json`, run `npm init -y` first; this works for non-JavaScript projects too.
 
-## Quick start: full hook setup
+Installation and plain `init` never install Git hooks, provision Graphify, or stage files. Existing module rules are preserved byte for byte. Init works before the first commit; the `HEAD~1 HEAD` example needs two commits. Other existing base/head revisions work too.
 
-Run these commands inside the repository you want to review:
+Optionally add a shortcut to your project's existing npm scripts:
 
-```powershell
-cd D:\path\to\your-repo
-
-diffslice init --install-hook
-git add diffslice.modules.json
-
-# Optional: build the initial graph now, before your next commit.
-diffslice hook run
-
-# Review two existing commits.
-diffslice compare HEAD~1 HEAD
+```json
+{
+  "scripts": {
+    "review": "diffslice compare HEAD~1 HEAD"
+  }
+}
 ```
 
-`init --install-hook` generates starter module rules, prepares committed-file membership/LOC caches, provisions an isolated Graphify 0.9.102 runtime using Python 3.12, and installs the combined pre-commit hook. Graphify's initial graph is built by the first `hook run` or commit; init does not perform that extraction itself.
-
-Existing module rules are preserved byte for byte. Init never stages generated files. Stage `diffslice.modules.json` before committing with the hook enabled.
-
-If Graphify is already installed in a Python environment:
-
-```powershell
-diffslice init --install-hook --graphify-python D:/tools/graphify/Scripts/python.exe
-```
-
-The supplied interpreter must contain Graphify 0.9.102 or newer. The hook records absolute Node/CLI and Python paths, so later commits do not require uv or the usual interactive-shell PATH. Reinstall the hook after moving the toolkit or changing its runtime.
-
-## Quick start: rules only
-
-```powershell
-cd D:\path\to\your-repo
-
-diffslice init --dry-run
-diffslice init
-diffslice compare HEAD~1 HEAD
-```
-
-Plain `init` does not install Graphify or hooks. It works before the first commit; comparison requires existing commits.
+Then run `npm run review`. Preview rules without writing anything using `npx diffslice init --dry-run`.
 
 Init detects common project manifests across JavaScript, Rust, Python, Go, Java/Gradle, .NET, PHP, Ruby, Elixir, Swift, and CMake. It suggests nested areas from source directories and explains each grouping in the terminal and the config's `description` fields. Source suggestions are bounded to two folder layers and require at least two files per area.
 
 These are structural starting points, not verified business-domain boundaries. Edit names and rules to match your architecture. `--dry-run` writes nothing; `--json` prints the complete plan, counts, and diagnostics. New configs prepare the first review's committed-file cache when HEAD exists; existing-config inspection does not rewrite caches.
 
+### Optional: Graphify and pre-commit updates
+
+Rules-based review does not require a hook. For combined Graphify updates, first install `uv` or prepare a Python interpreter containing Graphify 0.9.102+, then explicitly activate the hook in each checkout:
+
+```sh
+npx diffslice hook install
+git add diffslice.modules.json
+
+# Optional: build the initial graph now, before your next commit.
+npx diffslice hook run
+```
+
+Without `--graphify-python`, installation uses uv to provision an isolated Graphify 0.9.102 runtime with Python 3.12 and the `watch,sql` extras. This downloads dependencies; the first extraction happens on `hook run` or commit, not during installation. Reinstalling the hook upgrades older private environments that lack SQL support. Existing interpreters can be selected with `npx diffslice hook install --graphify-python /path/to/python`; they are inspected, never modified. `init --install-hook` combines initialization with this opt-in setup.
+
+Project-local hooks locate the installed CLI relative to the checkout, so dependency reinstalls at the same location do not require reinstalling the hook. Linked worktrees use their local installation when present, otherwise the installing checkout's CLI. Repository-local configuration paths follow a moved checkout; external runtimes remain external. A moved Python environment may need reprovisioning with `npx diffslice hook install`. The hook uses the recorded Node executable, falling back to `node` on PATH if it is missing.
+
+Hooks are per-checkout setup, not distributed by committing module rules. Do not add automatic Graphify/hook setup to `postinstall` or `prepare`: dependency installation should remain side-effect-free. Commits with changed staged code wait for Graphify; see the measured cost below.
+
 ## Review commits and PRs
 
 ```powershell
-diffslice compare HEAD~1 HEAD
-diffslice compare <base-sha> <head-sha> --repo D:/path/to/repo
+npx diffslice compare HEAD~1 HEAD
+npx diffslice compare <base-sha> <head-sha> --repo /path/to/repo
 
-diffslice pr https://github.com/owner/repo/pull/123 --repo D:/path/to/repo
+npx diffslice pr https://github.com/owner/repo/pull/123 --repo /path/to/repo
 
-diffslice compare HEAD~1 HEAD --modules D:/maps/modules.json
-diffslice compare HEAD~1 HEAD --map D:/maps/graph.json
+npx diffslice compare HEAD~1 HEAD --modules /path/to/modules.json
+npx diffslice compare HEAD~1 HEAD --map /path/to/graph.json
 ```
 
 Commit comparisons use the exact two trees. PR mode resolves metadata with `gh`, fetches missing objects, and compares the merge base against the PR head. A local repository is required; automatic cloning and shallow-history repair are not implemented.
@@ -146,10 +136,10 @@ Deleted files retain their base-revision owner under the selected rules. Renames
 For an initialized repository:
 
 ```powershell
-diffslice hook install
-diffslice hook status
-diffslice hook run
-diffslice hook uninstall
+npx diffslice hook install
+npx diffslice hook status
+npx diffslice hook run
+npx diffslice hook uninstall
 ```
 
 Every commit waits for this pipeline:
@@ -177,13 +167,17 @@ Local Windows measurements on a DevChestra clone:
 | One-file changed commit | 70 seconds |
 | Unchanged staged tree | 1-5 seconds |
 
-These are samples, not latency guarantees. Full synchronous Graphify work makes changed commits expensive. Native parser warnings are forwarded; optional language extras may be needed. The test runtime lacked Graphify's optional SQL parser, so its SQL dependency coverage was incomplete, although DiffSlice still reviewed those files.
+These are samples, not latency guarantees. Full synchronous Graphify work makes changed commits expensive. Native parser warnings are forwarded; optional language extras may be needed. That historical Windows runtime lacked Graphify's optional SQL parser, so its SQL dependency coverage was incomplete, although DiffSlice still reviewed those files. Current private runtime provisioning includes SQL support.
+
+On a fresh Linux DevChestra clone, a controlled Graphify 0.9.102 comparison with SQL support measured a one-file update at **10.12s native vs 8.32s with per-source path-rebase caching** (two runs each, about 18% faster). Full graph JSON was equal. Cold builds remained about 31s, and unchanged staged trees about 87–89ms. These are different hardware/platform measurements, not a 70s-to-8s speedup claim.
+
+The hook still synchronously runs native extraction, dependency resolution, clustering, analysis, and rendering. The rebase adapter applies only to Graphify 0.9.102; other versions retain native behavior. Per-stage timings are returned by `hook run`, with Graphify details in `diffslice/graphify/timings.json` under the worktree's Git directory. See [performance methodology and remaining limits](docs/precommit-performance.md).
 
 ### DiffSlice-only cache refresh
 
 ```powershell
 git add diffslice.modules.json
-diffslice modules update --staged
+npx diffslice modules update --staged
 ```
 
 This command refreshes only DiffSlice's staged module/LOC cache. It does not run Graphify or install a hook. Staged config contents are used, so partially staged rules remain consistent with the index.
@@ -205,9 +199,9 @@ Graphify communities remain an optional view. Supplied labels are preserved; unl
 ## Export and options
 
 ```powershell
-diffslice compare HEAD~1 HEAD --export review.html
-diffslice compare HEAD~1 HEAD --json
-diffslice compare HEAD~1 HEAD --port 4387 --no-open
+npx diffslice compare HEAD~1 HEAD --export review.html
+npx diffslice compare HEAD~1 HEAD --json
+npx diffslice compare HEAD~1 HEAD --port 4387 --no-open
 ```
 
 Export embeds fonts, viewer code, and all patches, and works without a server or internet. Normal browser mode loads patches on demand. Press Ctrl+C to stop the local server. `--cache-dir` overrides derived-cache storage; paths supplied as options are resolved from the CLI's current directory.
@@ -215,6 +209,14 @@ Export embeds fonts, viewer code, and all patches, and works without a server or
 Binary files and patches over 3 MB show explanations instead of text. Physical line counts include blanks/comments; empty, binary, and unavailable files receive a minimum display weight. Exported HTML contains source code, so share it as source material.
 
 ## Development and verification
+
+Only contributors need to clone and build DiffSlice:
+
+```sh
+git clone https://github.com/Pranav-Official/diffslice.git
+cd diffslice
+npm ci
+```
 
 ```powershell
 npm run typecheck
@@ -226,6 +228,7 @@ npm run test:browser
 npm run verify:init
 npm run verify:precommit
 npm run benchmark:hook
+npm run benchmark:precommit -- /path/to/repo
 ```
 
 The integration tests use temporary Git repos and cover changes, renames, binaries, caches, staged snapshots, hook preservation, linked worktrees, HTTP routes, offline export, and script escaping. Real Graphify tests need a prepared interpreter at `.artifacts/graphify-tool/venv`, or `DIFFSLICE_GRAPHIFY_PYTHON`; otherwise they report a skip. The clone verifier provisions its own runtime using uv.
@@ -240,6 +243,22 @@ npm run review:latest-two
 ```
 
 The first-parent comparison `6feeff2 -> cb35677` has 11 changed files, +967/-273. The latest two log entries `5fecd6f -> cb35677` have identical trees, so the zero-change view is intentional.
+
+### Package verification and release
+
+```sh
+npm run typecheck
+npm run build
+npm test
+npm run verify:package
+npm pack --ignore-scripts
+```
+
+The package verifier installs the tarball offline as a dev dependency in a temporary project outside this checkout. It exercises the local npm executable, initialization, commit comparison, live viewer assets/patches, and embedded offline export without Graphify or source/build dependencies.
+
+To test an unpublished build, install the generated tarball in a project with `npm install --save-dev --save-exact /path/to/diffslice-<version>.tgz`. Tarball installs record a local file path in the lockfile; use a published version for a portable team setup.
+
+CI verifies the consumer install on Linux and Windows. For a new release, bump the version in `package.json` and the lockfile, then run the checks above; published versions cannot be overwritten. The manually dispatched **Package and publish** workflow builds and uploads a verified npm tarball; publishing is off by default. To publish through the workflow, configure npm trusted publishing for this GitHub repository and `release.yml`, then dispatch with `publish` enabled. The publish job uses OIDC/provenance rather than a stored npm token. Nothing publishes on ordinary pushes or installs.
 
 ## Project layout
 
