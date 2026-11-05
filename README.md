@@ -89,7 +89,7 @@ Rules are selected in this order:
 2. For an in-repository config, its version at the selected head commit; if absent there, its local file. This allows immediate review after init. External configs are read from disk.
 3. Without rules, the Graphify map at `<repo>/graphify-out/graph.json`. Explicit `--map` selects Graphify instead of auto-detected rules.
 
-Map details identify the rules source. Code and diffs always come from the selected commits, even when local rules are used. Comparison does not check out files, modify the working tree, or invoke Graphify/LLMs.
+Map details identify the rules source. Code and diffs always come from the selected commits, even when local rules are used. Ordinary comparison does not check out files, modify the working tree, or invoke Graphify/LLMs. Functional analysis requires an explicit Logical-generation request.
 
 ### Using the viewer
 
@@ -197,6 +197,30 @@ These are Graphify's commands. DiffSlice does not currently provide a general `d
 Graphify communities remain an optional view. Supplied labels are preserved; unlabeled communities use source-directory labels. Files may belong to multiple communities, so their overview area is apportioned to avoid duplicate total size. The graph is marked revision-unverified; historical community membership is not reconstructed.
 
 ## Export and options
+
+### Functional change maps (opt-in AI)
+
+DiffSlice can explain **what changes functionally**, grouped into capabilities and functional areas, using an installed Claude Code, Codex, OpenCode, or Pi CLI. It reuses that CLI's authentication; no direct provider API integration or global DiffSlice installation is required. Generation is explicit and may incur provider charges. Ordinary comparisons and hooks do not run AI automatically.
+
+```sh
+# Run from a project where DiffSlice is installed as a dev dependency.
+npm exec -- diffslice logical BASE HEAD --agent codex --model MODEL_ID \
+  --output ~/Downloads/logical-review.html
+
+# Open the small HTML directly for an offline, mapping-only review.
+# Or reconnect its analysis to local module/directory maps and lazy code diffs:
+npm exec -- diffslice open ~/Downloads/logical-review.html --repo /path/to/checkout
+
+# Export one SVG per functional area, without another AI call:
+npm exec -- diffslice logical render ~/Downloads/logical-review.html \
+  --format svg --overview --output ~/Downloads/logical-diagrams
+```
+
+The standalone HTML embeds **no source files or patches**. It contains graphical maps, behavior descriptions, inferred purpose, exact commit SHAs, and evidence references. Import extracts and validates its data without executing its scripts, verifies local committed evidence, and does not rerun AI. If module rules/Graphify data are absent, opening a report derives structural starter modules from committed paths and caches them externally—no `init` or repository writes required.
+
+In the live viewer, choose **Logical → Generate mapping** and select an agent/model. You can also opt in from the terminal with `compare BASE HEAD --logical --agent codex --model MODEL_ID`, or import with `--logical-map report.html`. The Logical view's **Export HTML** action downloads the lightweight map-only report; the structural views retain their existing complete snapshot export.
+
+Logical output, caches, and agent workspaces stay **outside repositories and Git metadata directories**. In-repository paths (including symlinked ancestors) are rejected. With no `--output`, exports go under the user cache directory and the command prints their location. Missing commits are reported; logical workflows never silently fetch or check out history. See [logical review commands, supported CLI versions, limits, and safety boundaries](docs/logical-reviews.md).
 
 ```powershell
 npx diffslice compare HEAD~1 HEAD --export review.html

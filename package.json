@@ -26,7 +26,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test test/core.test.ts test/server.test.ts test/module-index.test.ts test/rule-review.test.ts test/init.test.ts test/precommit.test.ts",
+    "test": "node --import tsx --test test/core.test.ts test/server.test.ts test/module-index.test.ts test/rule-review.test.ts test/init.test.ts test/precommit.test.ts test/logical.test.ts",
     "benchmark:hook": "node scripts/benchmark-module-hook.mjs",
     "benchmark:precommit": "node scripts/benchmark-precommit.mjs",
     "verify:init": "node scripts/verify-init.mjs",
