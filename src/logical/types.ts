@@ -32,6 +32,8 @@ export interface LogicalMap extends LogicalAnalysis {
   comparison: 'commits' | 'pull-request';
   evidence: EvidenceRef[];
   changedPaths: string[];
+  /** Renamed files (source → destination); a node citing either side covers the destination path. */
+  renames?: { from: string; to: string }[];
   unclassified: string[];
   warnings: string[];
   provenance: {
@@ -72,31 +74,69 @@ export function safeRepoPath(raw: unknown): string {
   if (/^[a-z]:/i.test(value) || value.startsWith('/') || value.includes('\\') || value.split('/').some(p => !p || p === '..' || p === '.')) throw new Error('Logical map: unsafe evidence path.');
   return value;
 }
-export function validateAnalysis(raw: unknown, evidence: EvidenceRef[]): LogicalAnalysis {
+export function isSafeRepoPath(raw: unknown): boolean {
+  try { safeRepoPath(raw); return true; } catch { return false; }
+}
+const unsafeText = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\uD800-\uDFFF\uFFFE\uFFFF]/gu;
+// Agent output is repaired rather than rejected: strip unrepresentable characters and truncate over-long text.
+function repair(raw: unknown, max: number): unknown {
+  if (typeof raw !== 'string') return raw;
+  const clean = raw.replace(unsafeText, '');
+  return clean.length > max ? [...clean].slice(0, max - 1).join('') + '…' : clean;
+}
+/**
+ * Validates analysis JSON. Without `report` any defect throws (imports, saved maps). With `report` (untrusted agent
+ * output) defective items are repaired or dropped and described through `report`, so one bad node does not discard
+ * every batch already paid for.
+ */
+export function validateAnalysis(raw: unknown, evidence: EvidenceRef[], report?: (message: string) => void): LogicalAnalysis {
   const value = object(raw); const knownEvidence = new Set(evidence.map(item => item.id));
-  const refs = (raw: unknown) => list(raw, 'evidence references', 300).map(ref => {
-    const key = id(ref); if (!knownEvidence.has(key)) throw new Error(`Logical map: unknown evidence ${key}.`); return key;
+  const fix = (v: unknown, max: number) => report ? repair(v, max) : v;
+  // Strict: run and throw. Lenient: a failing item is dropped and reported.
+  const attempt = <T,>(what: string, fn: () => T): T | undefined => {
+    if (!report) return fn();
+    try { return fn(); } catch (e: any) { report(`${what}: ${String(e.message).replace(/^Logical map: /, '')}`); }
+  };
+  const items = (raw: unknown, name: string, max: number): unknown[] => {
+    if (report && Array.isArray(raw) && raw.length > max) { report(`${name}: truncated to ${max}`); return raw.slice(0, max); }
+    return list(raw, name, max);
+  };
+  const refs = (raw: unknown) => items(raw, 'evidence references', 300).flatMap(ref => {
+    const key = attempt('evidence reference', () => id(ref)); if (key === undefined) return [];
+    if (!knownEvidence.has(key)) { if (report) { report(`unknown evidence ${key}`); return []; } throw new Error(`Logical map: unknown evidence ${key}.`); }
+    return [key];
   });
-  const areas = unique(list(value.areas, 'areas', 100).map(raw => { const a = object(raw); return { id: id(a.id), name: text(a.name, 'area name', 100) }; }));
+  const firstOnly = <T extends { id: string }>(what: string, all: (T | undefined)[]): T[] => {
+    const seen = new Set<string>(), kept: T[] = [];
+    for (const item of all) {
+      if (!item) continue;
+      if (seen.has(item.id)) { if (report) { report(`${what} ${item.id}: duplicate id`); continue; } throw new Error('Logical map: duplicate id.'); }
+      seen.add(item.id); kept.push(item);
+    }
+    return kept;
+  };
+  const areas = firstOnly('area', items(value.areas, 'areas', 100).map(raw => attempt('area', () => { const a = object(raw); return { id: id(a.id), name: text(fix(a.name, 100), 'area name', 100) }; })));
   const areaIds = new Set(areas.map(a => a.id));
-  const nodes = unique(list(value.nodes, 'nodes', 1200).map(raw => {
+  const nodes = firstOnly('capability', items(value.nodes, 'nodes', 1200).map(raw => attempt('capability', () => {
     const n = object(raw); const area = id(n.area);
     if (!areaIds.has(area)) throw new Error(`Logical map: unknown area ${area}.`);
-    const node: LogicalNode = { id: id(n.id), area, title: text(n.title, 'capability title', 100), state: state(n.state), summary: text(n.summary, 'functional summary', 240), before: text(n.before, 'before behavior'), after: text(n.after, 'after behavior'), effect: text(n.effect, 'functional effect'), evidence: refs(n.evidence) };
-    if (n.purpose !== undefined && n.purpose !== '') node.purpose = text(n.purpose, 'inferred purpose');
+    const node: LogicalNode = { id: id(n.id), area, title: text(fix(n.title, 100), 'capability title', 100), state: state(n.state), summary: text(fix(n.summary, 240), 'functional summary', 240), before: text(fix(n.before, 1800), 'before behavior'), after: text(fix(n.after, 1800), 'after behavior'), effect: text(fix(n.effect, 1800), 'functional effect'), evidence: [...new Set(refs(n.evidence))] };
+    if (n.purpose !== undefined && n.purpose !== '') node.purpose = text(fix(n.purpose, 1800), 'inferred purpose');
     if (!node.evidence.length) throw new Error(`Logical map: ${node.id} has no evidence.`);
     return node;
-  }));
+  })));
   const nodeIds = new Set(nodes.map(n => n.id));
-  const edges = unique(list(value.edges, 'edges', 2400).map(raw => {
+  const edges = firstOnly('relationship', items(value.edges, 'edges', 2400).map(raw => attempt('relationship', () => {
     const e = object(raw); const from = id(e.from), to = id(e.to);
     if (!nodeIds.has(from) || !nodeIds.has(to) || from === to) throw new Error('Logical map: invalid relationship endpoint.');
-    const edge = { id: id(e.id), from, to, label: text(e.label, 'relationship label', 100), state: state(e.state), evidence: refs(e.evidence) };
+    const edge = { id: id(e.id), from, to, label: text(fix(e.label, 100), 'relationship label', 100), state: state(e.state), evidence: [...new Set(refs(e.evidence))] };
     if (!edge.evidence.length) throw new Error('Logical map: relationship has no evidence.');
     return edge;
-  }));
-  if (areas.some(a => !nodes.some(n => n.area === a.id))) throw new Error('Logical map: empty functional area.');
-  return { areas, nodes, edges };
+  })));
+  const populated = new Set(nodes.map(n => n.area)), empty = areas.filter(a => !populated.has(a.id));
+  if (empty.length && !report) throw new Error('Logical map: empty functional area.');
+  for (const a of empty) report?.(`area ${a.id}: dropped because it has no capabilities`);
+  return { areas: areas.filter(a => populated.has(a.id)), nodes, edges };
 }
 export function validateLogicalMap(raw: unknown): LogicalMap {
   const v = object(raw);
@@ -114,8 +154,17 @@ export function validateLogicalMap(raw: unknown): LogicalMap {
   if (p.analysisVersion !== 1 || typeof p.generatedAt !== 'string' || !Number.isFinite(Date.parse(p.generatedAt))) throw new Error('Logical map: invalid provenance.');
   if (v.comparison !== 'commits' && v.comparison !== 'pull-request') throw new Error('Logical map: invalid comparison.');
   const changedPaths = list(v.changedPaths, 'changed paths', 4000).map(safeRepoPath);
-  const linked = new Set(analysis.nodes.flatMap(n => n.evidence).map(ref => evidence.find(e => e.id === ref)!.path));
+  const known = new Set(changedPaths);
+  const renames = v.renames === undefined ? [] : list(v.renames, 'renames', 4000).map(raw => {
+    const r = object(raw), from = safeRepoPath(r.from), to = safeRepoPath(r.to);
+    if (!known.has(to)) throw new Error('Logical map: rename target is not a changed path.');
+    return { from, to };
+  });
+  const byId = new Map(evidence.map(e => [e.id, e.path]));
+  const linked = new Set(analysis.nodes.flatMap(n => n.evidence).map(ref => byId.get(ref)!));
+  // A base-side citation of a renamed file covers its destination path.
+  for (const r of renames) if (linked.has(r.from)) linked.add(r.to);
   // Derive coverage rather than trusting an agent/importer's coverage claims.
   const unclassified = changedPaths.filter(p => !linked.has(p));
-  return { kind: 'diffslice-logical', schema: 1, repository: text(v.repository, 'repository', 200), base: sha(v.base), head: sha(v.head), comparison: v.comparison, ...analysis, evidence, changedPaths, unclassified, warnings: list(v.warnings, 'warnings', 100).map(w => text(w, 'warning')), provenance: { agent: p.agent as AgentId, model: text(p.model, 'model', 200), ...(p.provider ? { provider: text(p.provider, 'provider', 200) } : {}), cliVersion: text(p.cliVersion, 'CLI version', 200), generatedAt: p.generatedAt, analysisVersion: 1 } };
+  return { kind: 'diffslice-logical', schema: 1, repository: text(v.repository, 'repository', 200), base: sha(v.base), head: sha(v.head), comparison: v.comparison, ...analysis, evidence, changedPaths, ...(renames.length ? { renames } : {}), unclassified, warnings: list(v.warnings, 'warnings', 100).map(w => text(w, 'warning')), provenance: { agent: p.agent as AgentId, model: text(p.model, 'model', 200), ...(p.provider ? { provider: text(p.provider, 'provider', 200) } : {}), cliVersion: text(p.cliVersion, 'CLI version', 200), generatedAt: p.generatedAt, analysisVersion: 1 } };
 }

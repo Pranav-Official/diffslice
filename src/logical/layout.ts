@@ -27,10 +27,14 @@ export function layoutLogical(map: LogicalMap, area = 'all', context = true): Lo
   const members = [...primary, ...(context ? map.nodes.filter(n => n.area !== area && boundaryIds.has(n.id)) : [])];
   // Stable topological traversal; cycles are retained and appended deterministically.
   const ids = new Set(members.map(n => n.id)), sorted: LogicalNode[] = [], pending = [...members].sort((a, b) => a.id.localeCompare(b.id));
+  // Kahn-style: track unresolved incoming edges per node instead of rescanning every edge for every pick.
+  const waiting = new Map<string, number>(), outgoing = new Map<string, string[]>();
+  for (const e of map.edges) if (ids.has(e.from) && ids.has(e.to)) { waiting.set(e.to, (waiting.get(e.to) ?? 0) + 1); (outgoing.get(e.from) ?? outgoing.set(e.from, []).get(e.from)!).push(e.to); }
   while (pending.length) {
-    let index = pending.findIndex(n => !map.edges.some(e => e.to === n.id && ids.has(e.from) && pending.some(p => p.id === e.from)));
+    let index = pending.findIndex(n => !waiting.get(n.id));
     if (index < 0) index = 0;
-    sorted.push(pending.splice(index, 1)[0]);
+    const [next] = pending.splice(index, 1); sorted.push(next);
+    for (const to of outgoing.get(next.id) ?? []) waiting.set(to, (waiting.get(to) ?? 1) - 1);
   }
   const columns = Math.min(3, Math.max(1, members.length));
   sorted.forEach((node, index) => nodes.push({ node, x: 48 + index % columns * 370, y: 70 + Math.floor(index / columns) * 235, width: 282, height: 146, external: node.area !== area }));

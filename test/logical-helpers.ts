@@ -6,7 +6,7 @@ import { validateLogicalMap, type LogicalMap } from '../src/logical/types.js';
 
 export async function sampleMap(repo: string, base: string, head: string): Promise<LogicalMap> {
   const e = await collectEvidence(repo, base, head);
-  return validateLogicalMap({ kind: 'diffslice-logical', schema: 1, repository: e.repository, base: e.base, head: e.head, comparison: 'commits', evidence: e.evidence, changedPaths: e.changedPaths, warnings: e.warnings,
+  return validateLogicalMap({ kind: 'diffslice-logical', schema: 1, repository: e.repository, base: e.base, head: e.head, comparison: 'commits', evidence: e.evidence, changedPaths: e.changedPaths, renames: e.renames, warnings: e.warnings,
     provenance: { agent: 'codex', model: 'fixture-model', cliVersion: 'fixture', generatedAt: new Date().toISOString(), analysisVersion: 1 },
     areas: [{ id: 'identity', name: 'Identity' }, { id: 'resources', name: 'Resources' }],
     nodes: [

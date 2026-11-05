@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
@@ -9,7 +9,7 @@ import { fixture } from './helpers.js';
 import { fakeAgent, sampleMap } from './logical-helpers.js';
 import { collectEvidence, verifyEvidence } from '../src/logical/evidence.js';
 import { generateLogicalMap, evidenceBatches } from '../src/logical/generate.js';
-import { AGENTS, validateLogicalMap } from '../src/logical/types.js';
+import { AGENTS, validateAnalysis, validateLogicalMap } from '../src/logical/types.js';
 import { extractResult, planInvocation, runProcess } from '../src/logical/agents.js';
 import { externalPath } from '../src/logical/storage.js';
 import { exportLogical, readLogicalReport, renderLogicalHtml } from '../src/logical/export.js';
@@ -102,8 +102,11 @@ test('external paths reject repository, Git directory, another checkout, and sym
   const f = await fixture(); t.after(() => rm(f.root, { recursive: true, force: true })); const external = await temporary(t);
   await assert.rejects(externalPath(f.root, path.join(f.root, 'report.html')), /outside/);
   await assert.rejects(externalPath(f.root, path.join(f.root, '.git', 'report.html')), /outside/);
+  // Only the source repository, its Git directories and its worktrees are refused; an unrelated/enclosing repository is a valid cache location.
   const other = path.join(external, 'other'); await mkdir(other); await git(other, ['init', '-q']);
-  await assert.rejects(externalPath(f.root, path.join(other, 'report.html')), /any repository/);
+  assert.equal(await externalPath(f.root, path.join(other, 'report.html')), path.join(await realpath(other), 'report.html'));
+  const linked = path.join(external, 'linked'); await git(f.root, ['worktree', 'add', '-q', '--detach', linked]);
+  await assert.rejects(externalPath(f.root, path.join(linked, 'report.html')), /outside/);
   if (process.platform !== 'win32') { await symlink(f.root, path.join(external, 'link')); await assert.rejects(externalPath(f.root, path.join(external, 'link', 'missing', 'report.html')), /outside/); }
 });
 
@@ -141,18 +144,34 @@ test('direct CLI generation reports paths and rejects an in-repository output be
 test('logical HTTP generation requires session token and same origin, preserves read-only routes, and exports mapping only', async t => {
   const f = await fixture(); t.after(() => rm(f.root, { recursive: true, force: true })); const external = await temporary(t), fake = await fakeAgent(); t.after(() => rm(fake.root, { recursive: true, force: true }));
   const review = await prepareReview({ repo: f.root, base: f.base, head: f.head, mapPath: f.mapPath, cacheDir: path.join(external, 'metrics') });
-  const { server, url } = await startServer({ repo: f.root, review, assets: path.resolve('dist/viewer'), agentBin: fake.filename, logicalCacheDir: path.join(external, 'logical') }); t.after(() => new Promise<void>(r => server.close(() => r())));
+  const { server, url } = await startServer({ repo: f.root, review, assets: path.resolve('dist/viewer'), agentBin: { agent: 'codex', bin: fake.filename }, logicalCacheDir: path.join(external, 'logical') }); t.after(() => new Promise<void>(r => server.close(() => r())));
   const endpoint = new URL('/api/logical/generate', url), status = await (await fetch(new URL('/api/logical/status', url))).json();
   assert.equal((await fetch(endpoint, { method: 'POST', body: '{}' })).status, 403);
   const headers = { 'Content-Type': 'application/json', 'X-DiffSlice-Token': status.token };
   assert.equal((await fetch(endpoint, { method: 'POST', headers: { ...headers, Origin: 'https://evil.test' }, body: '{}' })).status, 403);
   assert.equal((await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ agent: 'codex', bin: '/evil' }) })).status, 400);
-  assert.equal((await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ agent: 'codex', model: 'fixture' }) })).status, 202);
+  assert.equal((await fetch(new URL('/api/logical/map', url))).status, 404);
+  // Simultaneous requests (double click, two tabs) must start exactly one paid run.
+  const racers = await Promise.all([1, 2, 3].map(() => fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ agent: 'codex', model: 'fixture' }) })));
+  assert.deepEqual(racers.map(r => r.status).sort(), [202, 409, 409]);
   assert.equal((await fetch(endpoint, { method: 'POST', headers, body: '{}' })).status, 409);
   // Await the server job through its public endpoint; no paid/external provider is used.
   let ready: any;
   for (let i = 0; i < 100; i++) { ready = await (await fetch(new URL('/api/logical/status', url))).json(); if (ready.state !== 'running') break; await new Promise(r => setTimeout(r, 20)); }
   assert.equal(ready.state, 'ready', ready.error);
+  // Polling carries only the map identity; the map itself is fetched once.
+  assert.equal(ready.map, undefined); assert.equal(typeof ready.generatedAt, 'string');
+  const served = await (await fetch(new URL('/api/logical/map', url))).json(); assert.equal(served.provenance.generatedAt, ready.generatedAt);
+  // --agent-bin was given for codex only: choosing another agent must not run that binary.
+  const gitBin = (await run('sh', ['-c', 'command -v git'])).stdout.trim(); await symlink(gitBin, path.join(external, 'git'));
+  const calls = async () => (await readFile(path.join(fake.root, 'calls.jsonl'), 'utf8')).trim().split('\n').length, before = await calls(), originalPath = process.env.PATH;
+  process.env.PATH = external; // no real agent CLI may be reachable for this check
+  try {
+    assert.deepEqual((await (await fetch(new URL('/api/logical/agents', url))).json()).agents, ['codex']);
+    assert.equal((await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ agent: 'pi', model: 'fixture', provider: 'p', refresh: true }) })).status, 202);
+    let other: any; for (let i = 0; i < 100; i++) { other = await (await fetch(new URL('/api/logical/status', url))).json(); if (other.state !== 'running') break; await new Promise(r => setTimeout(r, 20)); }
+    assert.equal(other.state, 'failed'); assert.match(other.error, /not installed/); assert.equal(await calls(), before);
+  } finally { process.env.PATH = originalPath; }
   const exported = await (await fetch(new URL('/api/logical/export', url))).text(); assert.match(exported, /id="diffslice-logical"/); assert.doesNotMatch(exported, /export const login/);
   assert.equal((await fetch(new URL('/api/review', url), { method: 'POST' })).status, 405);
 });
@@ -172,4 +191,47 @@ test('agent invocation rejects flag-shaped model IDs and bounds hung subprocesse
   await assert.rejects(runProcess({ bin: process.execPath, args: ['-e', 'setInterval(()=>{},1000)'], env: process.env }, external, new AbortController().signal, undefined, 80), /timed out/);
   const controller = new AbortController(); controller.abort();
   await assert.rejects(runProcess({ bin: process.execPath, args: [], env: process.env }, external, controller.signal), /abort/i);
+});
+
+test('agent output is repaired or dropped item by item, while imported reports stay strict', async t => {
+  const f = await fixture(); t.after(() => rm(f.root, { recursive: true, force: true })); const map = await sampleMap(f.root, f.base, f.head), good = map.nodes[0], e0 = map.evidence[0].id;
+  const raw = { areas: [{ id: 'a', name: 'Area' }, { id: 'empty', name: 'Nothing here' }, { id: 'a', name: 'Duplicate' }],
+    nodes: [{ ...good, id: 'ok', area: 'a', title: 'T'.repeat(300), summary: 'S\u0000ummary', evidence: [e0, 'invented', e0] }, { ...good, id: 'no-area', area: 'missing' }, { ...good, id: 'no-evidence', area: 'a', evidence: ['invented'] }, { id: 'bad' }, { ...good, id: 'second', area: 'a', evidence: [e0] }],
+    edges: [{ id: 'self', from: 'ok', to: 'ok', label: 'x', state: 'changed', evidence: [e0] }, { id: 'dangling', from: 'ok', to: 'gone', label: 'x', state: 'changed', evidence: [e0] }, { id: 'fine', from: 'ok', to: 'second', label: 'uses', state: 'changed', evidence: [e0] }] };
+  const issues: string[] = [], analysis = validateAnalysis(raw, map.evidence, m => issues.push(m));
+  assert.deepEqual(analysis.areas.map(a => a.id), ['a']); assert.deepEqual(analysis.nodes.map(n => n.id), ['ok', 'second']); assert.deepEqual(analysis.edges.map(e => e.id), ['fine']);
+  assert.equal(analysis.nodes[0].title.length, 100); assert.equal(analysis.nodes[0].summary, 'Summary'); assert.deepEqual(analysis.nodes[0].evidence, [e0]);
+  assert.ok(issues.length >= 6);
+  assert.throws(() => validateAnalysis(raw, map.evidence));
+});
+
+test('a node citing the base side of a renamed file covers its destination path', async t => {
+  const f = await fixture(); t.after(() => rm(f.root, { recursive: true, force: true })); const e = await collectEvidence(f.root, f.base, f.head), map = await sampleMap(f.root, f.base, f.head);
+  assert.deepEqual(e.renames, [{ from: 'src/rename old.ts', to: 'src/rename new.ts' }]);
+  const oldSide = e.evidence.find(r => r.path === 'src/rename old.ts' && r.side === 'base')!, oldOnly = new Set([oldSide.id]);
+  const nodes = map.nodes.map(n => ({ ...n, evidence: n.evidence.filter(id => !oldOnly.has(id) && e.evidence.find(r => r.id === id)!.path !== 'src/rename new.ts') }));
+  nodes[0].evidence.push(oldSide.id);
+  const covered = validateLogicalMap({ ...map, nodes, renames: e.renames });
+  assert.ok(!covered.unclassified.includes('src/rename new.ts'));
+  assert.ok(validateLogicalMap({ ...map, nodes, renames: [] }).unclassified.includes('src/rename new.ts'));
+  await verifyEvidence(f.root, covered);
+  await assert.rejects(verifyEvidence(f.root, { ...covered, renames: [] }), /renames/);
+});
+
+test('changed files with unrepresentable names are skipped with a warning instead of failing analysis', { skip: process.platform === 'win32' }, async t => {
+  const f = await fixture(); t.after(() => rm(f.root, { recursive: true, force: true }));
+  await f.put('back\\slash.ts', 'export const odd = true;\n'); await git(f.root, ['add', '.']); await git(f.root, ['commit', '-qm', 'Odd name']);
+  const evidence = await collectEvidence(f.root, f.base, 'HEAD');
+  assert.ok(!evidence.changedPaths.some(p => p.includes('\\'))); assert.ok(evidence.changedPaths.includes('src/auth.ts'));
+  assert.ok(evidence.warnings.some(w => w.includes('cannot represent')));
+  const map = validateLogicalMap({ ...await sampleMap(f.root, f.base, 'HEAD') }); await verifyEvidence(f.root, map);
+});
+
+test('large range diffs are split per file and batched blob reads match committed content', async t => {
+  const f = await fixture(); t.after(() => rm(f.root, { recursive: true, force: true }));
+  const e = await collectEvidence(f.root, f.base, f.head);
+  const unit = e.units.find(u => u.path === 'src/auth.ts')!; assert.match(unit.patch, /^diff --git a\/src\/auth\.ts b\/src\/auth\.ts/); assert.doesNotMatch(unit.patch, /new file\.ts/);
+  assert.match(e.units.find(u => u.path === 'src/rename new.ts')!.patch, /rename from src\/rename old\.ts/);
+  assert.equal(e.units.find(u => u.path === 'binary.bin')!.patch, '');
+  assert.match(e.units.find(u => u.path === 'new file.ts')!.sources[0].text, /1: export const added/);
 });

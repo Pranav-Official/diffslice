@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, ChevronRight, GitBranch, Info, Map, Minus, Plus, Scan, SplitSquareHorizontal, X } from 'lucide-react';
 import { AGENTS, type AgentId, type EvidenceRef, type LogicalMap, type LogicalVersion } from '../logical/types.js';
 import { layoutLogical, renderLogicalSvg } from '../logical/layout.js';
@@ -6,7 +6,7 @@ import { layoutLogical, renderLogicalSvg } from '../logical/layout.js';
 function download(contents: string, name: string, type: string) {
   const url = URL.createObjectURL(new Blob([contents], { type })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-interface Job { state: string; progress?: string; error?: string; token: string; map?: LogicalMap }
+interface Job { state: string; progress?: string; error?: string; token: string; generatedAt?: string }
 export function LogicalView({ map: initial, live = false, onEvidence, onMap }: { map?: LogicalMap; live?: boolean; onEvidence?: (ref: EvidenceRef) => void; onMap?: (map: LogicalMap) => void }) {
   const [map, setMap] = useState(initial), [area, setArea] = useState('all'), [selected, setSelected] = useState<string>(), [edgeId, setEdgeId] = useState<string>();
   const [version, setVersion] = useState<LogicalVersion>('changes'), [context, setContext] = useState(true), [query, setQuery] = useState('');
@@ -21,7 +21,13 @@ export function LogicalView({ map: initial, live = false, onEvidence, onMap }: {
     if (!live) return; let disposed = false, timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try { const response = await fetch('/api/logical/status'); if (!response.ok) throw new Error('Could not read logical generation status.'); const next: Job = await response.json(); if (disposed) return;
-        setJob(next); if (next.map && next.map.provenance.generatedAt !== loaded.current) { loaded.current = next.map.provenance.generatedAt; setMap(next.map); onMap?.(next.map); setArea('all'); setSelected(undefined); setEdgeId(undefined); setZoom(1); }
+        setJob(next);
+        // Status carries only the map's identity; fetch the (possibly large) map once per new generation.
+        if (next.generatedAt && next.generatedAt !== loaded.current) {
+          const mapResponse = await fetch('/api/logical/map'); if (!mapResponse.ok) throw new Error('Could not read the logical map.');
+          const fresh: LogicalMap = await mapResponse.json(); if (disposed) return;
+          loaded.current = fresh.provenance.generatedAt; setMap(fresh); onMap?.(fresh); setArea('all'); setSelected(undefined); setEdgeId(undefined); setZoom(1);
+        }
       } catch (e: any) { if (!disposed) setError(e.message); }
       if (!disposed) timer = setTimeout(poll, 1200);
     };
@@ -45,12 +51,20 @@ export function LogicalView({ map: initial, live = false, onEvidence, onMap }: {
   const matchesNode = (n: NonNullable<typeof node>) => !query || `${n.title} ${n.summary} ${n.effect} ${n.evidence.map(id => map?.evidence.find(e => e.id === id)?.path).join(' ')}`.toLowerCase().includes(query.toLowerCase());
   const searchResults = query ? map?.nodes.filter(matchesNode).slice(0, 12) ?? [] : [];
   const reveal = (n: NonNullable<typeof node>) => { focus(n.area); setContext(true); setSelected(n.id); setQuery(''); };
-  const diagram = map ? renderLogicalSvg(map, { area, version, context }) : '';
+  // Layout + SVG are costly on large maps; recompute only when their inputs change (not on zoom, search or status polls).
+  const diagram = useMemo(() => map ? renderLogicalSvg(map, { area, version, context }) : '', [map, area, version, context]);
   useEffect(() => {
     const el = viewport.current; if (!el || !map) return;
     const fit = () => { const layout = layoutLogical(map, area, context); setFitWidth(el.clientWidth < 640 ? 640 : Math.max(640, Math.min(el.clientWidth, el.clientHeight * layout.width / (layout.height + 100)) * .97)); };
     const observer = new ResizeObserver(fit); observer.observe(el); fit(); return () => observer.disconnect();
   }, [map, area, context]);
+  // React attaches wheel listeners as passive, so preventDefault must be called from a native, non-passive listener.
+  const hasMap = !!map;
+  useEffect(() => {
+    const el = viewport.current; if (!el) return;
+    const wheel = (e: WheelEvent) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); setZoom(z => Math.max(.3, Math.min(3, z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))); } };
+    el.addEventListener('wheel', wheel, { passive: false }); return () => el.removeEventListener('wheel', wheel);
+  }, [hasMap]);
   const selectDiagram = (target: Element) => {
     const n = target.closest('[data-node]'); const e = target.closest('[data-edge]'); const a = target.closest('[data-area]');
     if (n) { setSelected(n.getAttribute('data-node')!); setEdgeId(undefined); }
@@ -78,7 +92,6 @@ export function LogicalView({ map: initial, live = false, onEvidence, onMap }: {
     {map ? <div className="logical-workspace"><nav className="logical-areas" aria-label="Functional areas"><button className={area === 'all' ? 'active' : ''} onClick={() => focus('all')}><Map size={14} />All areas</button>{map.areas.map(a => <button key={a.id} className={area === a.id ? 'active' : ''} onClick={() => focus(a.id)}>{a.name}<small>{map.nodes.filter(n => n.area === a.id && n.state !== 'context').length}</small></button>)}<div className="logical-coverage"><strong>{map.changedPaths.length - map.unclassified.length}/{map.changedPaths.length} changed paths linked</strong><p>Interpreted relationships, not a verified call graph.</p>{map.unclassified.length > 0 && <details><summary>Unclassified paths ({map.unclassified.length})</summary>{map.unclassified.map(p => <div key={p}>{p}</div>)}</details>}{map.warnings.length > 0 && <details><summary>Analysis limitations</summary>{map.warnings.map((w, i) => <p key={i}>{w}</p>)}</details>}</div></nav>
       <div className="logical-canvas-container">
         <div className="logical-canvas" ref={viewport}
-          onWheel={e => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); setZoom(z => Math.max(.3, Math.min(3, z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))); } }}
           onPointerDown={e => { if ((e.target as Element).closest('[role="button"]')) return; const el = e.currentTarget; drag.current = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop }; el.setPointerCapture(e.pointerId); }}
           onPointerMove={e => { const d = drag.current; if (d) { e.currentTarget.scrollLeft = d.left - e.clientX + d.x; e.currentTarget.scrollTop = d.top - e.clientY + d.y; } }}
           onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { loadDiff } from './patch.js';
 import type { Review, FileDiff, ExportData } from './types.js';
 import { logicalHttp } from './logical/http.js';
+import type { AgentId } from './logical/types.js';
 import { embeddedAssets, serializeEmbedded, viewerDirectory as viewerDir } from './viewer-assets.js';
 export { serializeEmbedded } from './viewer-assets.js';
 
@@ -32,7 +33,7 @@ export async function exportHtml(output: string, review: Review, getDiff: (id: s
   await mkdir(path.dirname(path.resolve(output)), { recursive: true }); await writeFile(output, html);
 }
 
-export async function startServer(options: { repo: string; review: Review; port?: number; assets?: string; logicalCacheDir?: string; agentBin?: string }): Promise<{ server: Server; url: string; stop: () => Promise<void> }> {
+export async function startServer(options: { repo: string; review: Review; port?: number; assets?: string; logicalCacheDir?: string; agentBin?: { agent: AgentId; bin: string } }): Promise<{ server: Server; url: string; stop: () => Promise<void> }> {
   const getDiff = createDiffLoader(options.repo, options.review); const assets = options.assets ?? viewerDir();
   const logical = logicalHttp({ ...options, assets, cacheDir: options.logicalCacheDir });
   const server = createServer(async (req, res) => {

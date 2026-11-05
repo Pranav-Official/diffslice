@@ -19,7 +19,7 @@ test.beforeAll(async () => {
   const fake = await fakeAgent(); fakeRoot = fake.root;
   const review = await prepareReview({ repo, base: f.base, head: f.head, mapPath: f.mapPath, cacheDir: path.join(root, 'metrics') });
   review.logical = map;
-  ({ server, url } = await startServer({ repo, review, assets: path.resolve('dist/viewer'), logicalCacheDir: path.join(root, 'cache'), agentBin: fake.filename }));
+  ({ server, url } = await startServer({ repo, review, assets: path.resolve('dist/viewer'), logicalCacheDir: path.join(root, 'cache'), agentBin: { agent: 'pi', bin: fake.filename } }));
 });
 test.afterAll(async () => {
   if (server) await new Promise<void>(r => server.close(() => r()));

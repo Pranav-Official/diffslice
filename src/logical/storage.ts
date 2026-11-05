@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, open, realpath, rename, rm } from 'node:fs/promises';
+import { mkdir, open, realpath, rename, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { git } from '../git.js';
@@ -14,15 +14,14 @@ export async function canonical(filename: string): Promise<string> {
 }
 export async function externalPath(repo: string, filename: string): Promise<string> {
   const target = await canonical(path.resolve(filename));
-  const roots = await Promise.all([realpath(repo), git(repo, ['rev-parse', '--git-common-dir']).then(p => canonical(path.resolve(repo, p.trim())))]);
-  if (roots.some(root => inside(root, target))) throw new Error('Logical output, cache, and temporary files must be outside the source repository and Git directory.');
-  // Also refuse another repository, including linked worktrees and an unrelated project.
-  let parent = target;
-  while (true) {
-    try { await lstat(path.join(parent, '.git')); throw new Error('Logical output must not be inside any repository. Choose an external folder.'); }
-    catch (error: any) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
-    const next = path.dirname(parent); if (next === parent) break; parent = next;
-  }
+  // Only the source repository, its Git directories and its linked worktrees are off limits. An enclosing or unrelated
+  // repository (e.g. a dotfiles repo at $HOME) must not make the default cache location unusable.
+  const roots = new Set(await Promise.all([realpath(repo), git(repo, ['rev-parse', '--git-common-dir']).then(p => canonical(path.resolve(repo, p.trim()))), git(repo, ['rev-parse', '--git-dir']).then(p => canonical(path.resolve(repo, p.trim())))]));
+  try {
+    const listing = await git(repo, ['worktree', 'list', '--porcelain', '-z']);
+    for (const field of listing.split('\0')) if (field.startsWith('worktree ')) roots.add(await canonical(field.slice(9)));
+  } catch { /* older Git: the checkout and Git directories are still covered */ }
+  if ([...roots].some(root => inside(root, target))) throw new Error('Logical output, cache, and temporary files must be outside the source repository, its Git directory, and its worktrees.');
   return target;
 }
 export async function writeExternal(repo: string, filename: string, contents: string, overwrite = false): Promise<string> {

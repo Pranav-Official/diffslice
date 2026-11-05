@@ -164,6 +164,7 @@ async function main() {
   const modulesPath = values.modules ? path.resolve(values.modules) : undefined;
   const mapPath = values.map ? path.resolve(values.map) : undefined;
   if ((values.logical || values['logical-map'] || command === 'open') && values.export) await externalPath(repo, path.resolve(values.export));
+  if (values['agent-bin'] && !values.agent) throw new Error('--agent-bin applies to one CLI. Add --agent claude-code|codex|opencode|pi.');
   if (values.logical && values['logical-map']) throw new Error('Choose --logical generation or --logical-map import, not both.');
   if (command === 'open' && (values.logical || values['logical-map'])) throw new Error('open imports its report without AI. Do not combine it with --logical or --logical-map.');
   let logical: LogicalMap | undefined = command === 'open' ? await readLogicalReport(path.resolve(first)) : values['logical-map'] ? await readLogicalReport(path.resolve(values['logical-map'])) : undefined;
@@ -182,7 +183,7 @@ async function main() {
     const output = logical ? await externalPath(repo, path.resolve(values.export)) : path.resolve(values.export); await exportHtml(output, review, createDiffLoader(repo, review)); console.log(`  Exported ${output}\n`);
     if (!values['no-open']) openBrowser(pathToFileURL(output).href); return;
   }
-  const { url, stop: closeReview } = await startServer({ repo, review, port, logicalCacheDir: values['cache-dir'], agentBin: values['agent-bin'] });
+  const { url, stop: closeReview } = await startServer({ repo, review, port, logicalCacheDir: values['cache-dir'], agentBin: values['agent-bin'] ? { agent: agentId(values.agent ?? ''), bin: values['agent-bin'] } : undefined });
   console.log(`  Review: ${url}\n  Press Ctrl+C to stop.\n`);
   if (!values['no-open']) openBrowser(url);
   let stopping = false;
