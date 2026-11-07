@@ -1,6 +1,6 @@
 {
   "name": "diffslice",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Review Git changes on a named, zoomable module map.",
   "type": "module",
   "license": "MIT",
@@ -21,7 +21,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -47,7 +47,7 @@
     "react-dom": "^19.2.0",
     "@playwright/test": "^1.64.1",
     "@types/d3-hierarchy": "^3.1.7",
-    "@types/node": "^22.20.5",
+    "@types/node": "^24.19.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "esbuild": "^0.27.0",

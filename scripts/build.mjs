@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 await mkdir('dist/viewer', { recursive: true });
-const cli = await build({ entryPoints: ['src/cli.ts'], outfile: 'dist/cli.js', bundle: true, platform: 'node', target: 'node22', format: 'esm', banner: { js: '#!/usr/bin/env node' }, sourcemap: true, metafile: true });
+const cli = await build({ entryPoints: ['src/cli.ts'], outfile: 'dist/cli.js', bundle: true, platform: 'node', target: 'node24', format: 'esm', banner: { js: '#!/usr/bin/env node' }, sourcemap: true, metafile: true });
 const viewer = await build({ entryPoints: ['src/viewer/main.tsx'], outfile: 'dist/viewer/app.js', bundle: true, platform: 'browser', target: 'es2022', format: 'iife', minify: true, jsx: 'automatic', loader: { '.woff2': 'file' }, assetNames: 'fonts/[name]-[hash]', define: { 'process.env.NODE_ENV': '"production"' }, metafile: true });
 // Bundled libraries/fonts no longer ship as runtime dependencies; retain their license texts.
 const packages = new Set();
