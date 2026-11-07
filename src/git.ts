@@ -47,7 +47,7 @@ export function parsePrUrl(url: string): { owner: string; name: string; number: 
   if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com' || !match) throw new Error('Expected a GitHub PR URL: https://github.com/owner/repo/pull/123');
   return { owner: match[1], name: match[2], number: Number(match[3]) };
 }
-export async function resolvePr(repo: string, url: string) {
+export async function resolvePr(repo: string, url: string, options: { fetchMissing?: boolean } = {}) {
   const pr = parsePrUrl(url);
   const repository = `${pr.owner}/${pr.name}`;
   let result;
@@ -58,7 +58,7 @@ export async function resolvePr(repo: string, url: string) {
   const remoteUrl = `https://github.com/${repository}.git`;
   for (const sha of [data.base.sha, data.head.sha]) {
     try { await git(repo, ['cat-file', '-e', `${sha}^{commit}`]); }
-    catch { await git(repo, ['fetch', '--no-tags', remoteUrl, sha], 120_000); }
+    catch { if (options.fetchMissing === false) throw new Error('Logical review requires the PR commits locally. Fetch the history explicitly, then retry.'); await git(repo, ['fetch', '--no-tags', remoteUrl, sha], 120_000); }
   }
   // A PR compares its contribution since divergence, not unrelated base-branch changes.
   const mergeBase = (await git(repo, ['merge-base', data.base.sha, data.head.sha])).trim();

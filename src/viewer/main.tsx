@@ -9,6 +9,10 @@ import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRigh
 import '@fontsource-variable/manrope';
 
 import './styles.css';
+import './logical.css';
+import { LogicalReport, LogicalView } from './LogicalView.js';
+import { validateLogicalMap } from '../logical/types.js';
+import type { EvidenceRef, LogicalMap } from '../logical/types.js';
 
 import { buildChangedTree, buildHierarchy, collectNodes, fileTrail, findTrail, visibleTree, type MapMode, type TreeNode } from '../treemap.js';
 
@@ -19,6 +23,7 @@ import type { ChangedFile, ExportData, Review } from '../types.js';
 const embedded = document.getElementById('diffslice-data');
 
 const offline: ExportData | null = embedded ? JSON.parse(embedded.textContent!) : null;
+const logicalEmbedded = document.getElementById('diffslice-logical');
 
 const number = (value: number) => Math.round(value).toLocaleString('en-US');
 
@@ -128,6 +133,9 @@ function TreeRow({ node, depth, collapsed, toggle, onSelect, selected }: { node:
 }
 
 function App({ review }: { review: Review }) {
+  const [logicalActive, setLogicalActive] = useState(!!review.logical);
+  const [logicalMap, setLogicalMap] = useState<LogicalMap | undefined>(review.logical);
+  const [evidenceTarget, setEvidenceTarget] = useState<EvidenceRef>();
 
   const [mode, setMode] = useState<MapMode>('modules'); const [trailIds, setTrailIds] = useState<string[]>(['modules']);
 
@@ -165,7 +173,7 @@ function App({ review }: { review: Review }) {
 
   useEffect(() => { const listener = (event: KeyboardEvent) => { if (event.key === 'Escape') { if (query) { setQuery(''); setSearchOpen(false); } else setSelectedFile(null); } }; window.addEventListener('keydown', listener); return () => window.removeEventListener('keydown', listener); }, [query]);
 
-  const selectFile = (file: ChangedFile) => { setSelectedFile(file); setNotice(''); };
+  const selectFile = (file: ChangedFile) => { setSelectedFile(file); setEvidenceTarget(undefined); setNotice(''); };
 
   const openNode = (node: TreeNode) => {
 
@@ -187,13 +195,13 @@ function App({ review }: { review: Review }) {
 
   };
 
-  const changeMode = (mode: MapMode) => { setMode(mode); setTrailIds([mode]); setQuery(''); setHovered(null); setNotice(''); };
+  const changeMode = (mode: MapMode) => { setLogicalActive(false); setMode(mode); setTrailIds([mode]); setQuery(''); setHovered(null); setNotice(''); };
 
   const exportReview = async () => {
 
     setExporting(true); setExportError('');
 
-    try { const response = await fetch('/api/export'); if (!response.ok) throw new Error('Could not export this review.'); const url = URL.createObjectURL(await response.blob()); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `diffslice-${short(review.head.sha)}.html`; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+    try { const response = await fetch(logicalActive ? '/api/logical/export' : '/api/export'); if (!response.ok) throw new Error('Could not export this review.'); const url = URL.createObjectURL(await response.blob()); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `diffslice-${logicalActive ? 'logical-' : ''}${short(review.head.sha)}.html`; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
 
     catch (error: any) { setExportError(error.message); } finally { setExporting(false); }
 
@@ -211,9 +219,16 @@ function App({ review }: { review: Review }) {
 
     {showInfo && <section className="map-info"><div><strong>{rulesMap ? 'Module hierarchy' : `Graphify ${review.map.provenance.version ?? 'map'}`}</strong><p>{rulesMap ? 'Named modules have one primary module per file. Boundaries come from your rules; nested modules appear when you drill down.' : `${review.map.modules.length} logical communities. Shared files are apportioned across communities in the module overview.`} {number(review.metrics.totalLines)} measured physical lines. Block area follows source size, not the number of edits.</p><p>{review.warnings.join(' ')} {review.metrics.unavailableFiles > 0 && `${review.metrics.unavailableFiles} files are not present in these revisions.`} Empty, binary, and unavailable files get a minimum display area.</p></div><button className="icon-button" aria-label="Close map details" onClick={() => setShowInfo(false)}><X size={18} /></button></section>}
 
-    <div className="map-toolbar"><div className="view-switch" aria-label="Treemap hierarchy"><button className={mode === 'modules' ? 'active' : ''} aria-pressed={mode === 'modules'} onClick={() => changeMode('modules')}><Layers3 size={14} />Modules</button><button className={mode === 'directories' ? 'active' : ''} aria-pressed={mode === 'directories'} onClick={() => changeMode('directories')}><Folder size={14} />Directories</button></div><div className="search-container"><label className="search"><Search size={15} /><input aria-label="Search modules or files" placeholder="Find a module, directory or file…" value={query} onFocus={() => setSearchOpen(true)} onChange={event => { setQuery(event.target.value); setSearchOpen(true); }} onKeyDown={event => { if (event.key === 'Enter' && results[0]) { const result = results[0]; if (result.kind === 'file') revealFile(result); else { openNode(result); setQuery(''); setSearchOpen(false); } } }} />{query && <button aria-label="Clear search" onClick={() => { setQuery(''); setSearchOpen(false); }}><X size={14} /></button>}</label>{query && searchOpen && <div className="search-results">{results.length ? results.map(result => <button key={result.id} onMouseDown={event => event.preventDefault()} onClick={() => { if (result.kind === 'file') revealFile(result); else { openNode(result); setQuery(''); setSearchOpen(false); } }}><span>{result.kind === 'file' ? <FileCode2 size={14} /> : result.kind === 'module' ? <Layers3 size={14} /> : <Folder size={14} />}{result.path ?? result.name}</span><small>{number(result.loc)} LOC</small></button>) : <p>No modules or files match this search.</p>}</div>}</div><label className="changes-filter"><input type="checkbox" checked={changedOnly} onChange={event => setChangedOnly(event.target.checked)} />Changes only</label><button className={`button tree-toggle ${sidebar ? 'is-open' : ''}`} onClick={() => setSidebar(!sidebar)} aria-expanded={sidebar} aria-label={sidebar ? 'Collapse file tree' : 'Show file tree'}>{sidebar ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}<span>Files</span><i>{review.totals.files}</i></button></div>
+    <div className="map-toolbar"><div className="view-switch" aria-label="Treemap hierarchy">
+      <button className={!logicalActive && mode === 'modules' ? 'active' : ''} aria-pressed={!logicalActive && mode === 'modules'} onClick={() => changeMode('modules')}><Layers3 size={14} />Modules</button>
+      <button className={!logicalActive && mode === 'directories' ? 'active' : ''} aria-pressed={!logicalActive && mode === 'directories'} onClick={() => changeMode('directories')}><Folder size={14} />Directories</button>
+      <button className={logicalActive ? 'active' : ''} aria-pressed={logicalActive} onClick={() => { setLogicalActive(true); setSelectedFile(null); }}>Logical</button>
+    </div>{!logicalActive && <><div className="search-container"><label className="search"><Search size={15} /><input aria-label="Search modules or files" placeholder="Find a module, directory or file…" value={query} onFocus={() => setSearchOpen(true)} onChange={event => { setQuery(event.target.value); setSearchOpen(true); }} onKeyDown={event => { if (event.key === 'Enter' && results[0]) { const result = results[0]; if (result.kind === 'file') revealFile(result); else { openNode(result); setQuery(''); setSearchOpen(false); } } }} />{query && <button aria-label="Clear search" onClick={() => { setQuery(''); setSearchOpen(false); }}><X size={14} /></button>}</label>{query && searchOpen && <div className="search-results">{results.length ? results.map(result => <button key={result.id} onMouseDown={event => event.preventDefault()} onClick={() => { if (result.kind === 'file') revealFile(result); else { openNode(result); setQuery(''); setSearchOpen(false); } }}><span>{result.kind === 'file' ? <FileCode2 size={14} /> : result.kind === 'module' ? <Layers3 size={14} /> : <Folder size={14} />}{result.path ?? result.name}</span><small>{number(result.loc)} LOC</small></button>) : <p>No modules or files match this search.</p>}</div>}</div><label className="changes-filter"><input type="checkbox" checked={changedOnly} onChange={event => setChangedOnly(event.target.checked)} />Changes only</label><button className={`button tree-toggle ${sidebar ? 'is-open' : ''}`} onClick={() => setSidebar(!sidebar)} aria-expanded={sidebar} aria-label={sidebar ? 'Collapse file tree' : 'Show file tree'}>{sidebar ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}<span>Files</span><i>{review.totals.files}</i></button></>}</div>
 
-    <div className={`workspace ${sidebar ? 'sidebar-open' : ''}`}>
+    {logicalActive && <LogicalView map={logicalMap} live={!offline} onMap={setLogicalMap} onEvidence={ref => { const file = review.files.find(f => f.path === ref.path || f.oldPath === ref.path); if (file) { selectFile(file); setEvidenceTarget(ref); } else setNotice('This evidence path is unchanged; no patch is available.'); }} />}
+    {logicalActive && selectedFile && <DiffPane file={selectedFile} review={review} offline={offline} onClose={() => setSelectedFile(null)} onSelect={selectFile} focus={evidenceTarget?.ranges?.[0] ? { side: evidenceTarget.side, line: evidenceTarget.ranges[0].start } : undefined} />}
+    {logicalActive && notice && <div className="logical-job" role="status">{notice}</div>}
+    <div className={`workspace ${sidebar ? 'sidebar-open' : ''}`} style={logicalActive ? { display: 'none' } : undefined}>
 
       <main className={`main-stage ${selectedFile ? 'has-diff' : ''}`}>
 
@@ -235,7 +250,7 @@ function App({ review }: { review: Review }) {
 
     </div>
 
-    <footer className="app-footer"><div className="map-legend"><span><i className="legend-neutral" />Unchanged</span><span><i className="legend-changed" />Modified</span><span><i className="legend-added" />Added</span><span><i className="legend-deleted" />Deleted</span></div><span className="weight-legend">Area = lines of code{!rulesMap && mode === 'modules' && scope.kind === 'root' ? ' · shared files apportioned' : ''}</span><span className="footer-provenance">{rulesMap ? 'Module rules | files verified at head' : 'Graphify map | revision unverified'}</span></footer>
+    {logicalActive ? <footer className="app-footer"><span>Functional interpretation · not a verified call graph</span><span>Evidence from the exact compared commits · purpose is inferred</span></footer> : <footer className="app-footer"><div className="map-legend"><span><i className="legend-neutral" />Unchanged</span><span><i className="legend-changed" />Modified</span><span><i className="legend-added" />Added</span><span><i className="legend-deleted" />Deleted</span></div><span className="weight-legend">Area = lines of code{!rulesMap && mode === 'modules' && scope.kind === 'root' ? ' · shared files apportioned' : ''}</span><span className="footer-provenance">{rulesMap ? 'Module rules | files verified at head' : 'Graphify map | revision unverified'}</span></footer>}
 
     {exportError && <div className="export-error" role="alert">{exportError}<button className="icon-button" aria-label="Dismiss export error" onClick={() => setExportError('')}><X size={15} /></button></div>}
 
@@ -247,7 +262,8 @@ function Bootstrap() {
 
   const [review, setReview] = useState<Review | null>(offline?.review ?? null); const [error, setError] = useState('');
 
-  useEffect(() => { if (!review) fetch('/api/review').then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body.error); return body; }).then(setReview).catch(error => setError(error.message)); }, []);
+  useEffect(() => { if (!review && !logicalEmbedded) fetch('/api/review').then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body.error); return body; }).then(setReview).catch(error => setError(error.message)); }, []);
+  if (logicalEmbedded) { try { return <LogicalReport map={validateLogicalMap(JSON.parse(logicalEmbedded.textContent!))} />; } catch (e: any) { return <div role="alert">Invalid logical report: {e.message}</div>; } }
 
   if (error) return <div className="boot-state"><SplitSquareHorizontal size={30} /><h1>Could not open this review</h1><p>{error}</p><p>Restart DiffSlice and open the URL printed in your terminal.</p></div>;
 

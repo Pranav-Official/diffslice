@@ -3,18 +3,25 @@ import { Check, ChevronLeft, ChevronRight, FileCode2, LoaderCircle, X } from 'lu
 import type { ChangedFile, DiffCell, ExportData, FileDiff, Review } from '../types.js';
 
 function Cell({ cell, side }: { cell?: DiffCell; side: 'old' | 'new' }) {
-  return <div className={`code-cell ${cell?.kind ?? 'absent'}`} data-side={side}>
+  return <div className={`code-cell ${cell?.kind ?? 'absent'}`} data-side={side} data-line={cell?.line}>
     <span className="line-number">{cell?.line ?? ''}</span><span className="line-sign" aria-hidden="true">{cell?.kind === 'add' ? '+' : cell?.kind === 'delete' ? '−' : ''}</span><code>{cell?.text ?? ''}</code>
   </div>;
 }
-export function DiffPane({ file, review, offline, onClose, onSelect }: { file: ChangedFile; review: Review; offline: ExportData | null; onClose: () => void; onSelect: (file: ChangedFile) => void }) {
+export function DiffPane({ file, review, offline, onClose, onSelect, focus }: { file: ChangedFile; review: Review; offline: ExportData | null; onClose: () => void; onSelect: (file: ChangedFile) => void; focus?: { side: 'base' | 'head'; line: number } }) {
   const [diff, setDiff] = useState<FileDiff | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState('');
   const cache = useRef(new Map<string, FileDiff>());
   const patch = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const pane = patch.current;
     if (pane) pane.scrollLeft = file.status === 'added' && pane.scrollWidth > pane.clientWidth ? pane.scrollWidth / 2 : 0;
-  }, [diff, file.id]);
+    if (pane) {
+      pane.querySelectorAll('.evidence-target').forEach(el => el.classList.remove('evidence-target'));
+      if (focus) {
+        const target = pane.querySelector(`[data-side="${focus.side === 'base' ? 'old' : 'new'}"][data-line="${focus.line}"]`)?.closest<HTMLElement>('.diff-row');
+        if (target) { target.classList.add('evidence-target'); pane.scrollTop += target.getBoundingClientRect().top - pane.getBoundingClientRect().top - 40; }
+      }
+    }
+  }, [diff, file.id, focus?.side, focus?.line]);
   useEffect(() => {
     const hit = offline?.diffs[file.id] ?? cache.current.get(file.id);
     if (hit) { setDiff(hit); setError(''); setLoading(false); return; }

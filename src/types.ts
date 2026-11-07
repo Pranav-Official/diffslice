@@ -1,3 +1,5 @@
+import type { LogicalMap } from './logical/types.js';
+
 export interface Module {
   id: string;
   name: string;
@@ -31,6 +33,7 @@ export interface FileMetric { lines: number; bytes: number; binary: boolean; ava
 export interface SourceMetrics { files: Record<string, FileMetric>; totalLines: number; measuredFiles: number; unavailableFiles: number; cacheHit: boolean }
 export interface Commit { sha: string; subject: string; author: string; date: string }
 export interface Review {
+  logical?: LogicalMap;
   schema: 1;
   id: string;
   repository: string;

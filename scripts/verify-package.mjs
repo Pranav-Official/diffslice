@@ -57,6 +57,26 @@ try {
   const data = JSON.parse(html.match(/<script id="diffslice-data" type="application\/json">([\s\S]*?)<\/script>/)[1]);
   assert.match(Object.values(data.diffs)[0].patch, /value = 2/);
 
+  // Exercise logical generation/import from the actual project dev dependency,
+  // without a provider account, global CLI, or access to this checkout's TS sources.
+  const agent = path.join(temporary, 'agent.mjs');
+  await writeFile(agent, `import {readFileSync} from 'node:fs';
+if(process.argv.includes('--version')){console.log('codex-cli 0.166.0');process.exit(0)}
+const data=JSON.parse(readFileSync(0,'utf8').split('EVIDENCE DATA:\\n')[1]);
+const result={areas:[{id:'behavior',name:'Application behavior'}],nodes:[{id:'value',area:'behavior',title:'Application value',state:'changed',summary:'Updated application value',before:'Previous value',after:'Updated value',effect:'Application value changes.',evidence:data.manifest.map(e=>e.id)}],edges:[]};
+console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:JSON.stringify(result)}}));
+`);
+  const logicalHtml = path.join(temporary, 'logical.html'), cache = path.join(temporary, 'cache');
+  const beforeLogical = (await git('status', '--porcelain=v1', '--untracked-files=all')).stdout;
+  await invoke('logical', 'HEAD~1', 'HEAD', '--agent', 'codex', '--model', 'fixture', '--agent-bin', agent, '--cache-dir', cache, '--output', logicalHtml);
+  const mappingHtml = await readFile(logicalHtml, 'utf8');
+  assert.match(mappingHtml, /id="diffslice-logical"/); assert.doesNotMatch(mappingHtml, /export const value/);
+  const imported = JSON.parse((await invoke('open', logicalHtml, '--cache-dir', cache, '--json')).stdout);
+  assert.equal(imported.logical.nodes[0].title, 'Application value'); assert.equal(imported.files.length, 1);
+  const rendered = JSON.parse((await invoke('logical', 'render', logicalHtml, '--format', 'svg', '--output', path.join(temporary, 'svg'), '--json')).stdout);
+  assert.equal(rendered.outputs.length, 2);
+  assert.equal((await git('status', '--porcelain=v1', '--untracked-files=all')).stdout, beforeLogical, 'Logical workflows must not write into the consumer repository.');
+
   const cli = path.join(repo, 'node_modules/diffslice/dist/cli.js');
   server = spawn(process.execPath, [cli, 'compare', 'HEAD~1', 'HEAD', '--no-open', '--port', '0'], { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] });
   const url = await new Promise((resolve, reject) => {
@@ -75,7 +95,7 @@ try {
   const liveReview = await (await fetch(`${url}/api/review`)).json();
   const diff = await (await fetch(`${url}/api/files/${liveReview.files[0].id}/diff`)).json();
   assert.match(diff.patch, /value = 2/);
-  console.log(`Verified ${packed.filename}: offline project-dependency install, local CLI, init, comparison, viewer assets, lazy patches, and self-contained export.`);
+  console.log(`Verified ${packed.filename}: offline project-dependency install, local CLI, init, comparison, viewer assets, lazy patches, full export, logical HTML generation/import, SVG rendering, and repository isolation.`);
 } finally {
   if (server && server.exitCode === null && server.signalCode === null) {
     const exited = new Promise(resolve => server.once('exit', resolve));

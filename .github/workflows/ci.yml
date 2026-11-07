@@ -22,3 +22,9 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run verify:package
+      - name: Install Chromium
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+      - name: Verify offline and live logical views
+        if: runner.os == 'Linux'
+        run: npx playwright test logical-browser.spec.ts
